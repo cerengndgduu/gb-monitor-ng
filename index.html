@@ -124,41 +124,44 @@
 const FC = { wind:'#1D9E75',solar:'#EF9F27',nuclear:'#7F77DD',gas:'#D85A30',coal:'#888780',hydro:'#378ADD',biomass:'#639922',imports:'#D4537E',other:'#B4B2A9' };
 const REN = new Set(['wind','solar','hydro','biomass']);
 const FOSSIL = new Set(['gas','coal']);
-const IC = { 'very low':{bg:'#0d2b1f',tx:'#1D9E75'},'low':{bg:'#162b0e',tx:'#639922'},'moderate':{bg:'#2b2209',tx:'#EF9F27'},'high':{bg:'#2b1409',tx:'#D85A30'},'very high':{bg:'#2b0909',tx:'#E24B4A'} };
-
-const PROXIES = [
-  u => u,
-  u => 'https://corsproxy.io/?' + encodeURIComponent(u),
-  u => 'https://api.allorigins.win/raw?url=' + encodeURIComponent(u),
-  u => 'https://thingproxy.freeboard.io/fetch/' + u,
-];
+const IC = {
+  'very low':{bg:'#0d2b1f',tx:'#1D9E75'},
+  'low':{bg:'#162b0e',tx:'#639922'},
+  'moderate':{bg:'#2b2209',tx:'#EF9F27'},
+  'high':{bg:'#2b1409',tx:'#D85A30'},
+  'very high':{bg:'#2b0909',tx:'#E24B4A'}
+};
 
 function tick() {
   document.getElementById('ts').textContent = new Date().toUTCString().slice(5,25)+' UTC';
 }
 
-async function safeFetch(url) {
-  for (const wrap of PROXIES) {
-    try {
-      const r = await fetch(wrap(url), { headers:{ 'Accept':'application/json' } });
-      if (!r.ok) continue;
-      const data = await r.json();
-      if (data) return data;
-    } catch(e) { continue; }
+async function apiFetch(url) {
+  const r = await fetch(url);
+  if (!r.ok) throw new Error('HTTP ' + r.status);
+  return r.json();
+}
+
+async function fetchWithRetry(url, attempts, delayMs) {
+  for (let i = 0; i < attempts; i++) {
+    try { return await apiFetch(url); }
+    catch(e) { if (i < attempts - 1) await new Promise(res => setTimeout(res, delayMs)); }
   }
-  console.warn('All proxies failed for:', url);
   return null;
 }
 
 function renderMix(mix) {
   let ren=0, fos=0;
-  mix.forEach(f => { if(REN.has(f.fuel)) ren+=f.perc; if(FOSSIL.has(f.fuel)) fos+=f.perc; });
+  mix.forEach(f => {
+    if (REN.has(f.fuel))    ren += f.perc;
+    if (FOSSIL.has(f.fuel)) fos += f.perc;
+  });
   document.getElementById('ren-val').textContent = ren.toFixed(1)+'%';
   document.getElementById('fos-val').textContent = fos.toFixed(1)+'%';
   document.getElementById('ren-big').textContent = ren.toFixed(1)+'%';
   document.getElementById('fos-big').textContent = fos.toFixed(1)+'%';
-  const sorted = [...mix].sort((a,b)=>b.perc-a.perc);
-  document.getElementById('genmix').innerHTML = sorted.map(f=>`
+  const sorted = [...mix].sort((a,b) => b.perc - a.perc);
+  document.getElementById('genmix').innerHTML = sorted.map(f => `
     <div class="frow">
       <div class="fname">${f.fuel}</div>
       <div class="bwrap"><div class="bfill" style="width:${f.perc}%;background:${FC[f.fuel]||'#888'}"></div></div>
@@ -166,14 +169,48 @@ function renderMix(mix) {
     </div>`).join('');
 }
 
+function renderTrend(data) {
+  const vals = data.map(d => d.intensity?.actual ?? d.intensity?.forecast).filter(v => v != null);
+  if (!vals.length) return;
+  const mn=Math.min(...vals), mx=Math.max(...vals);
+  const avg=Math.round(vals.reduce((a,b)=>a+b,0)/vals.length);
+  document.getElementById('t-min').textContent = mn;
+  document.getElementById('t-max').textContent = mx;
+  document.getElementById('t-avg').textContent = avg;
+  const W=900,H=100,px=14,py=12,rng=mx-mn||1;
+  const pts = vals.map((v,i) => {
+    const x = px+(i/(vals.length-1))*(W-2*px);
+    const y = py+(1-(v-mn)/rng)*(H-2*py);
+    return x.toFixed(1)+','+y.toFixed(1);
+  }).join(' ');
+  const last=vals[vals.length-1];
+  const lx=(px+(W-2*px)).toFixed(1);
+  const ly=(py+(1-(last-mn)/rng)*(H-2*py)).toFixed(1);
+  const apts=`${px},${H-py} ${pts} ${W-px},${H-py}`;
+  const co='#1D9E75';
+  const gl=[0,.25,.5,.75,1].map(t=>{
+    const y=(py+t*(H-2*py)).toFixed(1), v=Math.round(mx-t*rng);
+    return `<line x1="${px}" y1="${y}" x2="${W-px}" y2="${y}" stroke="#1a2e3a" stroke-width="0.5"/>
+            <text x="${px-4}" y="${y}" text-anchor="end" dominant-baseline="middle" font-family="monospace" font-size="9" fill="#3a5060">${v}</text>`;
+  }).join('');
+  document.getElementById('trend').innerHTML = `
+    <svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg" style="width:100%;height:100px;display:block;overflow:visible">
+      ${gl}
+      <polygon points="${apts}" fill="${co}" fill-opacity="0.08"/>
+      <polyline points="${pts}" fill="none" stroke="${co}" stroke-width="1.8" stroke-linejoin="round" stroke-linecap="round"/>
+      <circle cx="${lx}" cy="${ly}" r="3.5" fill="${co}"/>
+    </svg>`;
+}
+
 async function fetchAll() {
   tick();
-  document.getElementById('upd').textContent = new Date().toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'});
+  document.getElementById('upd').textContent =
+    new Date().toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'});
 
   const [d1, d2, d3] = await Promise.all([
-    safeFetch('https://api.carbonintensity.org.uk/intensity'),
-    safeFetch('https://api.carbonintensity.org.uk/generation'),
-    safeFetch('https://api.carbonintensity.org.uk/intensity/date'),
+    fetchWithRetry('https://api.carbonintensity.org.uk/intensity', 3, 2000),
+    fetchWithRetry('https://api.carbonintensity.org.uk/generation', 3, 2000),
+    fetchWithRetry('https://api.carbonintensity.org.uk/intensity/date', 3, 2000),
   ]);
 
   const pt = d1?.data?.[0];
@@ -184,30 +221,19 @@ async function fetchAll() {
     const c = IC[idx] || {bg:'#111a22',tx:'#4a6878'};
     const b = document.getElementById('ci-badge');
     b.textContent = idx.toUpperCase() || '—';
-    b.style.background = c.bg; b.style.color = c.tx;
+    b.style.background = c.bg;
+    b.style.color = c.tx;
   }
 
   const mix = d2?.data?.[0]?.generationmix;
   if (mix && mix.length) {
     renderMix(mix);
   } else {
-    document.getElementById('genmix').innerHTML = '<div class="loading">Generation data unavailable — retrying…</div>';
-    setTimeout(async () => { const r = await safeFetch('https://api.carbonintensity.org.uk/generation'); const m = r?.data?.[0]?.generationmix; if (m&&m.length) renderMix(m); }, 8000);
+    document.getElementById('genmix').innerHTML =
+      '<div class="loading">Generation data unavailable from API</div>';
   }
 
-  const vals = (d3?.data||[]).map(d=>d.intensity?.actual??d.intensity?.forecast).filter(v=>v!=null);
-  if (vals.length) {
-    const mn=Math.min(...vals), mx=Math.max(...vals), avg=Math.round(vals.reduce((a,b)=>a+b,0)/vals.length);
-    document.getElementById('t-min').textContent=mn;
-    document.getElementById('t-max').textContent=mx;
-    document.getElementById('t-avg').textContent=avg;
-    const W=900,H=100,px=14,py=12,rng=mx-mn||1;
-    const pts=vals.map((v,i)=>{ const x=px+(i/(vals.length-1))*(W-2*px); const y=py+(1-(v-mn)/rng)*(H-2*py); return x.toFixed(1)+','+y.toFixed(1); }).join(' ');
-    const last=vals[vals.length-1], lx=(px+(W-2*px)).toFixed(1), ly=(py+(1-(last-mn)/rng)*(H-2*py)).toFixed(1);
-    const apts=`${px},${H-py} ${pts} ${W-px},${H-py}`, co='#1D9E75';
-    const gl=[0,.25,.5,.75,1].map(t=>{ const y=(py+t*(H-2*py)).toFixed(1),v=Math.round(mx-t*rng); return `<line x1="${px}" y1="${y}" x2="${W-px}" y2="${y}" stroke="#1a2e3a" stroke-width="0.5"/><text x="${px-4}" y="${y}" text-anchor="end" dominant-baseline="middle" font-family="monospace" font-size="9" fill="#3a5060">${v}</text>`; }).join('');
-    document.getElementById('trend').innerHTML=`<svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg" style="width:100%;height:100px;display:block;overflow:visible">${gl}<polygon points="${apts}" fill="${co}" fill-opacity="0.08"/><polyline points="${pts}" fill="none" stroke="${co}" stroke-width="1.8" stroke-linejoin="round" stroke-linecap="round"/><circle cx="${lx}" cy="${ly}" r="3.5" fill="${co}"/></svg>`;
-  }
+  if (d3?.data?.length) renderTrend(d3.data);
 }
 
 setInterval(tick, 1000);
