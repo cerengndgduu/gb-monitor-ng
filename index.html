@@ -1,0 +1,471 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>GB Grid Monitor</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:      #06090c;
+      --surface: #0d1318;
+      --surface2:#111a22;
+      --border:  #1a2e3a;
+      --accent:  #1D9E75;
+      --amber:   #D85A30;
+      --text:    #c0d8e4;
+      --muted:   #4a6878;
+      --mono:    'Share Tech Mono', 'Courier New', monospace;
+      --sans:    'Barlow Condensed', 'Arial Narrow', sans-serif;
+    }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--sans);
+      min-height: 100vh;
+      padding: 24px 28px;
+    }
+
+    /* scanline overlay */
+    body::after {
+      content: '';
+      position: fixed;
+      inset: 0;
+      background: repeating-linear-gradient(
+        0deg, transparent, transparent 3px,
+        rgba(0,0,0,0.04) 3px, rgba(0,0,0,0.04) 4px
+      );
+      pointer-events: none;
+      z-index: 9999;
+    }
+
+    /* Header */
+    .hdr {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-end;
+      padding-bottom: 16px;
+      border-bottom: 1px solid var(--border);
+      margin-bottom: 20px;
+    }
+    .hdr-title {
+      font-size: 26px;
+      font-weight: 600;
+      color: var(--accent);
+      font-family: var(--mono);
+      letter-spacing: 0.04em;
+    }
+    .hdr-sub {
+      font-size: 11px;
+      color: var(--muted);
+      font-family: var(--mono);
+      margin-top: 4px;
+      letter-spacing: 0.08em;
+    }
+    .hdr-right { text-align: right; }
+    .live-row {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      justify-content: flex-end;
+      font-size: 11px;
+      color: var(--accent);
+      font-family: var(--mono);
+      letter-spacing: 0.1em;
+      margin-bottom: 4px;
+    }
+    .dot {
+      width: 7px; height: 7px;
+      border-radius: 50%;
+      background: var(--accent);
+      animation: blink 2s ease-in-out infinite;
+    }
+    @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0.2} }
+
+    /* Metrics row */
+    .metrics {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 14px;
+      margin-bottom: 14px;
+    }
+    .mcard {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      padding: 18px 20px;
+    }
+    .mlabel {
+      font-family: var(--mono);
+      font-size: 10px;
+      color: var(--muted);
+      letter-spacing: 0.15em;
+      text-transform: uppercase;
+      margin-bottom: 8px;
+    }
+    .mval {
+      font-family: var(--mono);
+      font-size: 36px;
+      font-weight: 400;
+      line-height: 1;
+      color: var(--text);
+    }
+    .munit {
+      font-family: var(--mono);
+      font-size: 10px;
+      color: var(--muted);
+      margin-top: 5px;
+    }
+    .mbadge {
+      display: inline-block;
+      font-family: var(--mono);
+      font-size: 10px;
+      margin-top: 8px;
+      padding: 3px 10px;
+      border-radius: 2px;
+      letter-spacing: 0.1em;
+    }
+
+    /* Panels */
+    .panels {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 14px;
+      margin-bottom: 14px;
+    }
+    .panel {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      padding: 18px 20px;
+    }
+    .panel.full { grid-column: 1 / -1; }
+    .plabel {
+      font-family: var(--mono);
+      font-size: 10px;
+      color: var(--muted);
+      letter-spacing: 0.15em;
+      text-transform: uppercase;
+      margin-bottom: 14px;
+    }
+
+    /* Generation mix bars */
+    .frow {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 9px;
+    }
+    .fname {
+      font-family: var(--mono);
+      font-size: 10px;
+      color: var(--muted);
+      width: 72px;
+      flex-shrink: 0;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+    }
+    .bwrap {
+      flex: 1;
+      height: 13px;
+      background: rgba(255,255,255,0.03);
+      border: 1px solid var(--border);
+      overflow: hidden;
+    }
+    .bfill {
+      height: 100%;
+      transition: width 1.2s cubic-bezier(.16,1,.3,1);
+    }
+    .fpct {
+      font-family: var(--mono);
+      font-size: 10px;
+      color: var(--muted);
+      width: 38px;
+      text-align: right;
+      flex-shrink: 0;
+    }
+
+    /* Renewables panel */
+    .renew-panel {
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      text-align: center;
+      gap: 0;
+    }
+    .big-num {
+      font-family: var(--mono);
+      font-size: 52px;
+      line-height: 1;
+    }
+    .divider {
+      width: 100%;
+      height: 1px;
+      background: var(--border);
+      margin: 16px 0;
+    }
+
+    /* Trend header row */
+    .trend-hdr {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 10px;
+    }
+    .tstats {
+      font-family: var(--mono);
+      font-size: 10px;
+      color: var(--muted);
+      display: flex;
+      gap: 14px;
+    }
+    .tstats span { color: var(--text); }
+
+    /* Status bar */
+    .statusbar {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 20px;
+      font-family: var(--mono);
+      font-size: 10px;
+      color: var(--muted);
+      border-top: 1px solid var(--border);
+      padding-top: 12px;
+      letter-spacing: 0.06em;
+    }
+    .statusbar span { color: var(--text); }
+
+    /* Util */
+    .loading {
+      font-family: var(--mono);
+      font-size: 11px;
+      color: var(--muted);
+      padding: 28px;
+      text-align: center;
+      animation: fade 1.5s ease-in-out infinite;
+    }
+    @keyframes fade { 0%,100%{opacity:1} 50%{opacity:0.4} }
+
+    .rbtn {
+      background: none;
+      border: 1px solid var(--border);
+      color: var(--muted);
+      font-family: var(--mono);
+      font-size: 10px;
+      padding: 4px 10px;
+      cursor: pointer;
+      letter-spacing: 0.1em;
+      margin-top: 6px;
+    }
+    .rbtn:hover { border-color: var(--accent); color: var(--accent); }
+
+    @media (max-width: 700px) {
+      .metrics { grid-template-columns: 1fr; }
+      .panels  { grid-template-columns: 1fr; }
+      .panel.full { grid-column: 1; }
+      .hdr { flex-direction: column; gap: 12px; }
+    }
+  </style>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Barlow+Condensed:wght@400;600&display=swap" rel="stylesheet">
+</head>
+<body>
+
+<div class="hdr">
+  <div>
+    <div class="hdr-title">GB GRID MONITOR</div>
+    <div class="hdr-sub">NATIONAL ENERGY SYSTEM OPERATOR — LIVE PUBLIC DATA</div>
+  </div>
+  <div class="hdr-right">
+    <div class="live-row"><div class="dot"></div>LIVE</div>
+    <div class="hdr-sub" id="ts">—</div>
+    <button class="rbtn" onclick="fetchAll()">↻ REFRESH</button>
+  </div>
+</div>
+
+<div class="metrics">
+  <div class="mcard">
+    <div class="mlabel">Carbon Intensity</div>
+    <div class="mval" id="ci-val">—</div>
+    <div class="munit">gCO₂eq / kWh</div>
+    <div id="ci-badge" class="mbadge" style="background:#111a22;color:#4a6878">—</div>
+  </div>
+  <div class="mcard">
+    <div class="mlabel">Renewables</div>
+    <div class="mval" id="ren-val" style="color:#1D9E75">—</div>
+    <div class="munit">% of current mix</div>
+  </div>
+  <div class="mcard">
+    <div class="mlabel">Fossil Fuels</div>
+    <div class="mval" id="fos-val" style="color:#D85A30">—</div>
+    <div class="munit">% of current mix</div>
+  </div>
+</div>
+
+<div class="panels">
+  <div class="panel">
+    <div class="plabel">Generation Mix — Current Half Hour</div>
+    <div id="genmix"><div class="loading">Fetching generation data…</div></div>
+  </div>
+
+  <div class="panel renew-panel">
+    <div class="mlabel">Renewables</div>
+    <div class="big-num" id="ren-big" style="color:#1D9E75">—%</div>
+    <div class="mlabel" style="margin-top:6px">of current mix</div>
+    <div class="divider"></div>
+    <div class="mlabel">Fossil Fuels</div>
+    <div class="big-num" id="fos-big" style="color:#D85A30">—%</div>
+    <div class="mlabel" style="margin-top:6px">of current mix</div>
+  </div>
+
+  <div class="panel full">
+    <div class="trend-hdr">
+      <div class="plabel" style="margin-bottom:0">Carbon Intensity — Today (30-min intervals)</div>
+      <div class="tstats">
+        MIN <span id="t-min">—</span>
+        &nbsp;MAX <span id="t-max">—</span>
+        &nbsp;AVG <span id="t-avg">—</span>
+      </div>
+    </div>
+    <div id="trend"><div class="loading">Loading trend…</div></div>
+  </div>
+</div>
+
+<div class="statusbar">
+  <div>SOURCE <span>api.carbonintensity.org.uk</span></div>
+  <div>REGION <span>GREAT BRITAIN</span></div>
+  <div>RESOLUTION <span>30 MIN</span></div>
+  <div>UPDATED <span id="upd">—</span></div>
+</div>
+
+<script>
+const FC = {
+  wind:'#1D9E75', solar:'#EF9F27', nuclear:'#7F77DD',
+  gas:'#D85A30', coal:'#888780', hydro:'#378ADD',
+  biomass:'#639922', imports:'#D4537E', other:'#B4B2A9'
+};
+const REN   = new Set(['wind','solar','hydro','biomass']);
+const FOSSIL = new Set(['gas','coal']);
+const IC = {
+  'very low':  { bg:'#0d2b1f', tx:'#1D9E75' },
+  'low':       { bg:'#162b0e', tx:'#639922' },
+  'moderate':  { bg:'#2b2209', tx:'#EF9F27' },
+  'high':      { bg:'#2b1409', tx:'#D85A30' },
+  'very high': { bg:'#2b0909', tx:'#E24B4A' },
+};
+
+function tick() {
+  document.getElementById('ts').textContent =
+    new Date().toUTCString().slice(5, 25) + ' UTC';
+}
+
+async function fetchAll() {
+  tick();
+  document.getElementById('upd').textContent =
+    new Date().toLocaleTimeString('en-GB', { hour:'2-digit', minute:'2-digit' });
+
+  try {
+    const [r1, r2, r3] = await Promise.all([
+      fetch('https://api.carbonintensity.org.uk/intensity'),
+      fetch('https://api.carbonintensity.org.uk/generation'),
+      fetch('https://api.carbonintensity.org.uk/intensity/date'),
+    ]);
+    const [d1, d2, d3] = await Promise.all([r1.json(), r2.json(), r3.json()]);
+
+    // --- Carbon intensity ---
+    const pt  = d1.data?.[0];
+    if (pt) {
+      const val = pt.intensity?.actual ?? pt.intensity?.forecast ?? 0;
+      const idx = pt.intensity?.index || '';
+      document.getElementById('ci-val').textContent = val;
+      const c = IC[idx] || { bg:'#111a22', tx:'#4a6878' };
+      const b = document.getElementById('ci-badge');
+      b.textContent     = idx.toUpperCase() || '—';
+      b.style.background = c.bg;
+      b.style.color      = c.tx;
+    }
+
+    // --- Generation mix ---
+    const mix = d2.data?.[0]?.generationmix;
+    if (mix) {
+      let ren = 0, fos = 0;
+      mix.forEach(f => {
+        if (REN.has(f.fuel))   ren += f.perc;
+        if (FOSSIL.has(f.fuel)) fos += f.perc;
+      });
+      const rv = ren.toFixed(1) + '%';
+      const fv = fos.toFixed(1) + '%';
+      document.getElementById('ren-val').textContent = rv;
+      document.getElementById('fos-val').textContent = fv;
+      document.getElementById('ren-big').textContent = rv;
+      document.getElementById('fos-big').textContent = fv;
+
+      const sorted = [...mix].sort((a, b) => b.perc - a.perc);
+      document.getElementById('genmix').innerHTML = sorted.map(f => `
+        <div class="frow">
+          <div class="fname">${f.fuel}</div>
+          <div class="bwrap">
+            <div class="bfill" style="width:${f.perc}%;background:${FC[f.fuel]||'#888'}"></div>
+          </div>
+          <div class="fpct">${f.perc.toFixed(1)}%</div>
+        </div>`).join('');
+    }
+
+    // --- Daily trend ---
+    const vals = (d3.data || [])
+      .map(d => d.intensity?.actual ?? d.intensity?.forecast)
+      .filter(v => v != null);
+
+    if (vals.length) {
+      const mn  = Math.min(...vals);
+      const mx  = Math.max(...vals);
+      const avg = Math.round(vals.reduce((a, b) => a + b, 0) / vals.length);
+      document.getElementById('t-min').textContent = mn;
+      document.getElementById('t-max').textContent = mx;
+      document.getElementById('t-avg').textContent = avg;
+
+      const W = 900, H = 100, px = 14, py = 12, rng = mx - mn || 1;
+      const pts = vals.map((v, i) => {
+        const x = px + (i / (vals.length - 1)) * (W - 2 * px);
+        const y = py + (1 - (v - mn) / rng) * (H - 2 * py);
+        return x.toFixed(1) + ',' + y.toFixed(1);
+      }).join(' ');
+      const last = vals[vals.length - 1];
+      const lx = (px + (W - 2 * px)).toFixed(1);
+      const ly = (py + (1 - (last - mn) / rng) * (H - 2 * py)).toFixed(1);
+      const apts = `${px},${H - py} ${pts} ${W - px},${H - py}`;
+      const co = '#1D9E75';
+
+      const gridLines = [0, 0.25, 0.5, 0.75, 1].map(t => {
+        const y = (py + t * (H - 2 * py)).toFixed(1);
+        const v = Math.round(mx - t * rng);
+        return `<line x1="${px}" y1="${y}" x2="${W - px}" y2="${y}" stroke="#1a2e3a" stroke-width="0.5"/>
+                <text x="${px - 4}" y="${y}" text-anchor="end" dominant-baseline="middle"
+                  font-family="'Share Tech Mono',monospace" font-size="9" fill="#3a5060">${v}</text>`;
+      }).join('');
+
+      document.getElementById('trend').innerHTML = `
+        <svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg"
+          style="width:100%;height:100px;display:block;overflow:visible">
+          ${gridLines}
+          <polygon points="${apts}" fill="${co}" fill-opacity="0.08"/>
+          <polyline points="${pts}" fill="none" stroke="${co}" stroke-width="1.8"
+            stroke-linejoin="round" stroke-linecap="round"/>
+          <circle cx="${lx}" cy="${ly}" r="3.5" fill="${co}"/>
+        </svg>`;
+    }
+
+  } catch (err) {
+    console.error(err);
+    document.getElementById('genmix').innerHTML =
+      '<div class="loading">Unable to fetch live data — check network connection</div>';
+  }
+}
+
+setInterval(tick, 1000);
+fetchAll();
+setInterval(fetchAll, 5 * 60 * 1000);
+</script>
+</body>
+</html>
