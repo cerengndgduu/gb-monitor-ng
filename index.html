@@ -126,24 +126,27 @@ const REN = new Set(['wind','solar','hydro','biomass']);
 const FOSSIL = new Set(['gas','coal']);
 const IC = { 'very low':{bg:'#0d2b1f',tx:'#1D9E75'},'low':{bg:'#162b0e',tx:'#639922'},'moderate':{bg:'#2b2209',tx:'#EF9F27'},'high':{bg:'#2b1409',tx:'#D85A30'},'very high':{bg:'#2b0909',tx:'#E24B4A'} };
 
+const PROXIES = [
+  u => u,
+  u => 'https://corsproxy.io/?' + encodeURIComponent(u),
+  u => 'https://api.allorigins.win/raw?url=' + encodeURIComponent(u),
+  u => 'https://thingproxy.freeboard.io/fetch/' + u,
+];
+
 function tick() {
   document.getElementById('ts').textContent = new Date().toUTCString().slice(5,25)+' UTC';
 }
 
 async function safeFetch(url) {
-  const proxies = [
-    u => u,
-    u => 'https://corsproxy.io/?' + encodeURIComponent(u),
-    u => 'https://api.allorigins.win/raw?url=' + encodeURIComponent(u),
-  ];
-  for (const wrap of proxies) {
+  for (const wrap of PROXIES) {
     try {
       const r = await fetch(wrap(url), { headers:{ 'Accept':'application/json' } });
       if (!r.ok) continue;
-      return await r.json();
+      const data = await r.json();
+      if (data) return data;
     } catch(e) { continue; }
   }
-  console.warn('All fetch attempts failed for:', url);
+  console.warn('All proxies failed for:', url);
   return null;
 }
 
@@ -173,7 +176,6 @@ async function fetchAll() {
     safeFetch('https://api.carbonintensity.org.uk/intensity/date'),
   ]);
 
-  // Carbon intensity
   const pt = d1?.data?.[0];
   if (pt) {
     const val = pt.intensity?.actual ?? pt.intensity?.forecast ?? 0;
@@ -185,20 +187,14 @@ async function fetchAll() {
     b.style.background = c.bg; b.style.color = c.tx;
   }
 
-  // Generation mix
   const mix = d2?.data?.[0]?.generationmix;
   if (mix && mix.length) {
     renderMix(mix);
   } else {
     document.getElementById('genmix').innerHTML = '<div class="loading">Generation data unavailable — retrying…</div>';
-    setTimeout(async () => {
-      const r = await safeFetch('https://api.carbonintensity.org.uk/generation');
-      const m = r?.data?.[0]?.generationmix;
-      if (m && m.length) renderMix(m);
-    }, 8000);
+    setTimeout(async () => { const r = await safeFetch('https://api.carbonintensity.org.uk/generation'); const m = r?.data?.[0]?.generationmix; if (m&&m.length) renderMix(m); }, 8000);
   }
 
-  // Daily trend
   const vals = (d3?.data||[]).map(d=>d.intensity?.actual??d.intensity?.forecast).filter(v=>v!=null);
   if (vals.length) {
     const mn=Math.min(...vals), mx=Math.max(...vals), avg=Math.round(vals.reduce((a,b)=>a+b,0)/vals.length);
